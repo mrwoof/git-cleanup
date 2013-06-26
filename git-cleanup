@@ -5,16 +5,15 @@
 #
 #       This script looks at your list of local branches, extracts
 #       issue numbers from the branch names, checks which issues
-#       have been merged, deletes the merged branches, and then
+#       have been closed/merged, deletes the merged branches, and then
 #       deletes the remote copies of the merged branches.
 #
-#       This makes use of the github `POST /repos/:user/:repo/pulls/:issue/merge`
-#       endpoint. 
+#       This makes use of the github /repos/:user/:repo/issues/:id endpoint. 
 #       More info on that is available at http://developer.github.com/v3/pulls/
 #
 # USAGE
 #
-#       $ sh delete_merged_pulls.sh [options] [feature_branch]
+#       $ git cleanup [options]
 #
 # OPTIONS
 #
@@ -23,15 +22,9 @@
 #       --save - save access token for future use
 #       -t --token - github oauth token
 #       -i --issue  - issue number
-#       -b --base   - the branch you want your changes pulled into. default: master
-#       --base-account - the account containing issue and the base branch to merge into
+#       --base-account - the account to clean up
 #       --base-repo - the github repository name
 #       
-#       feature-branch - the branch (or git ref) where your changes are implemented
-#                        feature branch is assumed to be user/feature-branch if no
-#                        user is specified. default: working branch name (or prompted)
-#
-#
 # CONFIGURATION
 #
 #       If available, this script uses the config values from git-open-pull. When not available,
@@ -41,24 +34,28 @@
 #       [github]
 #               user = ....
 #               password = ....
-#       [gitOpenPull]
+#       [gitCleanup]
 #               token = .....
 #               baseAccount = ....
 #               baseRepo = .....
-#               base = master
-PYTHON_CMD="/bitly/local/bin/python"
-[ $? != 0 ] && echo "unable to find 'python' command" && exit 1;
-GIT_CMD=`/usr/bin/which git`
-[ $? != 0 ] && echo "unable to find 'git' command" && exit 1;
+PYTHON_CMD=${PYTHON_CMD:-$(which python)}
+if [ -z "$PYTHON_CMD" ] || ! $PYTHON_CMD --version >/dev/null 2>&1 ; then
+    echo "unable to find 'python' command"
+    exit 1
+fi
+GIT_CMD=${GIT_CMD:-$(which git)}
+if [ -z "$GIT_CMD" ] || ! $GIT_CMD --version >/dev/null 2>&1 ; then
+    echo "unable to find 'git' command"
+    exit 1
+fi
 
 # grab defaults where we can
 #####################
-BASE_ACCOUNT=`$GIT_CMD config --get gitOpenPull.baseAccount`
-BASE_REPO=`$GIT_CMD config --get gitOpenPull.baseRepo`
-BASE_BRANCH=`$GIT_CMD config --get gitOpenPull.base || echo "master"`
+BASE_ACCOUNT=`$GIT_CMD config --get gitCleanup.baseAccount`
+BASE_REPO=`$GIT_CMD config --get gitCleanup.baseRepo`
 GITHUB_USER=`$GIT_CMD config --get github.user`
 GITHUB_PASSWORD=`$GIT_CMD config --get github.password`
-GITHUB_TOKEN=`$GIT_CMD config --get gitOpenPull.token`
+GITHUB_TOKEN=`$GIT_CMD config --get gitCleanup.token`
 FEATURE_BRANCH=`$GIT_CMD describe --contains --all HEAD`
 
 function get_issue_number()
@@ -124,12 +121,6 @@ while [ "$1" != "" ]; do
         --base-repo)
             BASE_REPO="$VALUE"
             ;;
-        -b | --base)
-            BASE_BRANCH="$VALUE"
-            ;;
-        -i | --issue)
-            ISSUE_NUMBER="$VALUE"
-            ;;
         --save)
             SAVE_ACCESS_TOKEN=1
             ;;
@@ -181,20 +172,20 @@ if "token" in data:
     
     # conditionally save the access token
     if [ "$SAVE_ACCESS_TOKEN" == "1" ]; then
-        $GIT_CMD config gitOpenPull.token "$GITHUB_TOKEN"
+        $GIT_CMD config gitCleanup.token "$GITHUB_TOKEN"
     fi
 else
     echo "... using saved access token"
 fi
 
 if [ -z "$BASE_ACCOUNT" ]; then
-    read -p "destination github username (account to pull code into): " BASE_ACCOUNT
-    $GIT_CMD config gitOpenPull.baseAccount $BASE_ACCOUNT
+    read -p "destination github username (account to clean up): " BASE_ACCOUNT
+    $GIT_CMD config gitCleanup.baseAccount $BASE_ACCOUNT
 fi
 
 if [ -z "$BASE_REPO" ]; then
     read -p "github repsitory name (ie: github.com/$BASE_ACCOUNT/___): " BASE_REPO
-    $GIT_CMD config gitOpenPull.baseRepo $BASE_REPO
+    $GIT_CMD config gitCleanup.baseRepo $BASE_REPO
 fi
 
 
