@@ -21,9 +21,6 @@
 #       -p --password - github password (not needed when passing --token, or using a saved token)
 #       --save - save access token for future use
 #       -t --token - github oauth token
-#       -i --issue  - issue number
-#       --base-account - the account to clean up
-#       --base-repo - the github repository name
 #       
 # CONFIGURATION
 #
@@ -36,8 +33,6 @@
 #               password = ....
 #       [gitCleanup]
 #               token = .....
-#               baseAccount = ....
-#               baseRepo = .....
 PYTHON_CMD=${PYTHON_CMD:-$(which python)}
 if [ -z "$PYTHON_CMD" ] || ! $PYTHON_CMD --version >/dev/null 2>&1 ; then
     echo "unable to find 'python' command"
@@ -51,12 +46,10 @@ fi
 
 # grab defaults where we can
 #####################
-BASE_ACCOUNT=`$GIT_CMD config --get gitCleanup.baseAccount`
-BASE_REPO=`$GIT_CMD config --get gitCleanup.baseRepo`
+BASE_REPO=$(basename $($GIT_CMD rev-parse --show-toplevel))
 GITHUB_USER=`$GIT_CMD config --get github.user`
 GITHUB_PASSWORD=`$GIT_CMD config --get github.password`
 GITHUB_TOKEN=`$GIT_CMD config --get gitCleanup.token`
-FEATURE_BRANCH=`$GIT_CMD describe --contains --all HEAD`
 
 function get_issue_number()
 {
@@ -74,7 +67,7 @@ function issue_status() {
     local _ISSUE_NUMBER=$1
     # now lookup issue information
     # endpoint => /repos/:user/:repo/issues/:id
-    local endpoint="https://api.github.com/repos/$BASE_ACCOUNT/$BASE_REPO/issues/$_ISSUE_NUMBER?access_token=$GITHUB_TOKEN"
+    local endpoint="https://api.github.com/repos/$GITHUB_USER/$BASE_REPO/issues/$_ISSUE_NUMBER?access_token=$GITHUB_TOKEN"
     local ISSUE_JSON=`curl --silent -H "Accept: application/vnd.github-issue.text+json,application/json" $endpoint`
     local ISSUE_STATE=$(echo $ISSUE_JSON | $PYTHON_CMD -c '
 try:
@@ -115,17 +108,10 @@ while [ "$1" != "" ]; do
         -t | --token)
             GITHUB_TOKEN="$VALUE"
             ;;
-        --base-account)
-            BASE_ACCOUNT="$VALUE"
-            ;;
-        --base-repo)
-            BASE_REPO="$VALUE"
-            ;;
         --save)
             SAVE_ACCESS_TOKEN=1
             ;;
         * )
-            FEATURE_BRANCH="$1"
             ;;
     esac
     shift
@@ -178,26 +164,14 @@ else
     echo "... using saved access token"
 fi
 
-if [ -z "$BASE_ACCOUNT" ]; then
-    read -p "destination github username (account to clean up): " BASE_ACCOUNT
-    $GIT_CMD config gitCleanup.baseAccount $BASE_ACCOUNT
-fi
-
 if [ -z "$BASE_REPO" ]; then
-    read -p "github repsitory name (ie: github.com/$BASE_ACCOUNT/___): " BASE_REPO
+    read -p "github repsitory name (ie: github.com/$GITHUB_USER/___): " BASE_REPO
     $GIT_CMD config gitCleanup.baseRepo $BASE_REPO
 fi
 
 
 # validate remote information
 ##############################
-
-# branch should be separated with ':'
-FEATURE_BRANCH=$(echo $FEATURE_BRANCH | sed -e 's/\//:/g')
-# if username part was not specified, assume it's the github username
-if ! echo $FEATURE_BRANCH | egrep -q ':'; then
-    FEATURE_BRANCH="$GITHUB_USER:$FEATURE_BRANCH"
-fi
 
 merged_branches=""
 
@@ -211,7 +185,7 @@ then
     echo ""
 fi
 
-for branch in $(git branch | grep -v "*" | sort)
+for branch in $($GIT_CMD branch | grep -v "*" | sort)
 do
     issue_number=$(get_issue_number $branch)
     if [ "$issue_number" == "" ]
@@ -223,7 +197,7 @@ do
     echo -n "  Checking issue $issue_number... "
 
     this_issue_status=$(issue_status $issue_number)
-    # endpoint="https://api.github.com/repos/$BASE_ACCOUNT/$BASE_REPO/pulls/$issue_number/merge"
+    # endpoint="https://api.github.com/repos/$GITHUB_USER/$BASE_REPO/pulls/$issue_number/merge"
     # merge_status=`curl --silent -w %{http_code} "$endpoint?access_token=$GITHUB_TOKEN" -o /dev/null`
 
     if [ "$this_issue_status" == "closed" ]
@@ -257,7 +231,7 @@ else
     read x
         if [ "$x" == "y" ]
     then
-        remote_branches=$(git branch -r | grep mrwoof\/ | cut -d'/' -f 2)
+        remote_branches=$($GIT_CMD branch -r | grep $GITHUB_USER\/ | cut -d'/' -f 2)
         
         if [ "$remote_branches" = "" ]; then
             echo "No remote branches. Quitting."
@@ -267,7 +241,7 @@ else
         delete_branches=""
         confirm_msg=""
         for branch in $remote_branches; do    
-            local_branch=`git branch | grep " $branch\$"`
+            local_branch=`$GIT_CMD branch | grep " $branch\$"`
             if [ "$local_branch" = "" ]; then
                 delete_branches="$delete_branches $branch"
                 confirm_msg="$confirm_msg\n    $branch"
@@ -281,7 +255,7 @@ else
         
         for branch in $delete_branches; do
              echo "DELETING $branch"
-             git push mrwoof :$branch
+             $GIT_CMD push $GITHUB_ACCOUNT :$branch
         done
     else
         exit
